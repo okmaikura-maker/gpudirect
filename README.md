@@ -47,10 +47,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.3.0-py3-none-any.whl
+pip install gpudirect-0.4.0-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.3.0.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.4.0.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 
@@ -59,6 +59,25 @@ pip install numpy
 ```
 
 ---
+
+## 主要ライブラリと連携（v0.4.0〜）
+
+**PyTorch / CuPy / pandas / TensorFlow / JAX / numpy とそのままつながります。**
+どのライブラリの配列も受け取り、どのライブラリの形でも返せます。
+
+```python
+import gpudirect as gd, torch, numpy as np
+g = gd.GPU(0)
+
+x = g.to_gpu(torch.arange(6))     # torch / cupy / tf / jax / pandas / numpy / list 何でも入力
+x.torch()                          # → torch.Tensor
+x.cupy()                           # → cupy.ndarray
+x.pandas()                         # → pandas.Series / DataFrame
+x.numpy()                          # → numpy
+x.to("jax")                        # → 任意ライブラリを名前指定
+
+# CUDA 配列は __cuda_array_interface__ を公開 → CuPy/Numba とゼロコピー連携
+```
 
 ## 対応する GPU（v0.2.0〜）
 

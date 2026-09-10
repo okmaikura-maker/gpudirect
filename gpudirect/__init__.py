@@ -370,7 +370,7 @@ class Function:
 #   gd.GPU / gd.devices / gd.saturate / gd.array / gd.GpuGPTTrainer ... が使える。
 # numpy 未導入でも基本 import は軽いまま(初めて触れた時に必要な物だけ読む)。
 # ============================================================================
-_SUBMODULES = ("easy", "opencl", "turbo", "fastnumpy")
+_SUBMODULES = ("easy", "opencl", "turbo", "fastnumpy", "interop")
 _LAZY = {
     # 汎用API(全ベンダ)
     "GPU": ("easy", "GPU"),
@@ -386,6 +386,9 @@ _LAZY = {
     "matmul": ("fastnumpy", "matmul"),
     "relu": ("fastnumpy", "relu"),
     "farray": ("fastnumpy", "farray"),
+    # ライブラリ連携
+    "to_numpy": ("interop", "to_numpy"),
+    "to_library": ("interop", "to_library"),
 }
 __all__ = list(__all__) + list(_SUBMODULES) + list(_LAZY.keys())
 

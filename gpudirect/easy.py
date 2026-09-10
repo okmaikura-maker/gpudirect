@@ -23,25 +23,9 @@ from . import Device, Context, DeviceMemory, _driver as _d
 from . import opencl as _ocl
 
 
-# ---- どのライブラリの配列でも numpy に変換して受け取る ----
-def _to_numpy(x):
-    if isinstance(x, np.ndarray):
-        return np.ascontiguousarray(x)
-    if isinstance(x, (GpuArray, CLArray)):
-        return x.get()
-    if hasattr(x, "__dlpack__"):
-        try:
-            return np.ascontiguousarray(np.from_dlpack(x))
-        except Exception:
-            pass
-    if hasattr(x, "detach"):            # torch tensor
-        try:
-            return np.ascontiguousarray(x.detach().cpu().numpy())
-        except Exception:
-            pass
-    if hasattr(x, "__array__"):
-        return np.ascontiguousarray(np.asarray(x))
-    return np.ascontiguousarray(np.asarray(x))
+# ---- どのライブラリの配列でも numpy に変換して受け取る(interop 経由) ----
+from . import interop as _interop
+_to_numpy = _interop.to_numpy
 
 
 def devices():
@@ -197,3 +181,8 @@ def GPU(device=0, backend=None):
     if backend == "opencl":
         return CLGPU(device)
     raise ValueError(f"unknown backend: {backend}")
+
+
+# 主要ライブラリとの相互連携メソッドを注入(.numpy/.torch/.cupy/.pandas/.to/…)
+_interop.attach(GpuArray, cuda=True)     # CUDA 配列は __cuda_array_interface__ も公開
+_interop.attach(CLArray, cuda=False)
