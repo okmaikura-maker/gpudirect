@@ -9,6 +9,22 @@ NVIDIA ドライバの `nvcuda.dll`(と、内蔵GPU用に `OpenCL.dll`)を `ctyp
 
 ---
 
+## import 一つで全部（v0.2.2〜）
+
+```python
+import gpudirect as gd
+gd.devices()                       # 全ベンダの GPU/iGPU
+g = gd.GPU(0)                      # 汎用API(easy)
+g = gd.GPU(0, backend="opencl")   # AMD/Intel/iGPU
+gd.saturate()                      # 一行で全GPU飽和(turbo)
+c = gd.array(A) @ gd.array(B)      # numpy風(fastnumpy)
+gd.GpuGPTTrainer(...)              # GPUで学習
+```
+
+`easy` / `turbo` / `fastnumpy` / `transformer` / `train_gpt` などは
+すべて `gpudirect` の中に統合済み。`import gpudirect` だけで到達できます
+(numpy が要る機能に初めて触れた時だけ numpy を読み込む軽量設計)。
+
 ## これは何？
 
 普通、GPU を使うには CUDA Toolkit(数GB)や PyTorch のような大きなものを入れて、
@@ -32,10 +48,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.2.1-py3-none-any.whl
+pip install gpudirect-0.2.2-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.2.1.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.2.2.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 

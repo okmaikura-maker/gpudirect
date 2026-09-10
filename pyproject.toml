@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gpudirect"
-version = "0.2.1"
+version = "0.2.2"
 description = "Call the GPU (and iGPU) directly from Python via nvcuda.dll / OpenCL.dll — no CUDA Toolkit, no CuPy. Hand-written PTX kernels, one-line saturation."
 readme = "README_gpudirect.md"
 requires-python = ">=3.8"

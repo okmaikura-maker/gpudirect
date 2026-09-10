@@ -363,3 +363,49 @@ class Function:
             None), "cuLaunchKernel")
         if sync:
             _d.check(_d.cuCtxSynchronize(), "cuCtxSynchronize")
+
+
+# ============================================================================
+# 全機能をトップレベルに統合(遅延ロード)。 import gpudirect as gd だけで
+#   gd.GPU / gd.devices / gd.saturate / gd.array / gd.GpuGPTTrainer ... が使える。
+# numpy 未導入でも基本 import は軽いまま(初めて触れた時に必要な物だけ読む)。
+# ============================================================================
+_SUBMODULES = ("easy", "opencl", "turbo", "fastnumpy",
+               "transformer", "train", "train_gpt", "nn")
+_LAZY = {
+    # 汎用API(全ベンダ)
+    "GPU": ("easy", "GPU"),
+    "devices": ("easy", "devices"),
+    "GpuArray": ("easy", "GpuArray"),
+    "CLArray": ("easy", "CLArray"),
+    # 一行飽和
+    "saturate": ("turbo", "saturate"),
+    # numpy 風(fastnumpy)
+    "array": ("fastnumpy", "array"),
+    "zeros_like_np": ("fastnumpy", "zeros"),
+    "ones": ("fastnumpy", "ones"),
+    "matmul": ("fastnumpy", "matmul"),
+    "relu": ("fastnumpy", "relu"),
+    "farray": ("fastnumpy", "farray"),
+    # AI 推論・学習
+    "GpuTransformer": ("transformer", "GpuTransformer"),
+    "GpuGPTTrainer": ("train_gpt", "GpuGPTTrainer"),
+    "GpuMLPTrainer": ("train", "GpuMLPTrainer"),
+    "GpuMLP": ("nn", "GpuMLP"),
+    "FusedMLP": ("nn", "FusedMLP"),
+}
+__all__ = list(__all__) + list(_SUBMODULES) + list(_LAZY.keys())
+
+
+def __getattr__(name):
+    import importlib
+    if name in _SUBMODULES:
+        return importlib.import_module("." + name, __name__)
+    if name in _LAZY:
+        mod, attr = _LAZY[name]
+        return getattr(importlib.import_module("." + mod, __name__), attr)
+    raise AttributeError(f"module 'gpudirect' has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(list(globals().keys()) + list(_SUBMODULES) + list(_LAZY.keys()))
