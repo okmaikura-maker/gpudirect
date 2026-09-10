@@ -32,10 +32,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.2.0-py3-none-any.whl
+pip install gpudirect-0.2.1-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.2.0.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.2.1.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 
@@ -95,7 +95,7 @@ turbo.saturate()      # Python から呼ぶ場合
 numpy を知っていれば、そのままの感覚で書けます。
 
 ```python
-import fastnumpy as fnp
+import gpudirect.fastnumpy as fnp   # gpudirect に統合済み
 
 a = fnp.array([[1, 2], [3, 4]])   # GPU に配列を置く
 b = fnp.ones((2, 2))
