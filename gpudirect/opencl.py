@@ -116,3 +116,78 @@ def saturate(device_handle, seconds=8.0, iters=3000, gsize=1 << 20):
         r(P(h))
     flop = launches*gsize*iters*8*2
     return dict(seconds=dt, launches=launches, gflops=flop/dt/1e9)
+
+
+# ============================================================================
+# OpenCL 計算バックエンド(NVIDIA / AMD / Intel の GPU・iGPU で汎用に計算)
+# ============================================================================
+for _n, _a in [
+    ("clEnqueueWriteBuffer", [P, P, ctypes.c_uint, _SZ, _SZ, P, ctypes.c_uint, P, P]),
+    ("clEnqueueReadBuffer",  [P, P, ctypes.c_uint, _SZ, _SZ, P, ctypes.c_uint, P, P]),
+]:
+    f = getattr(_cl, _n); f.restype = ctypes.c_int; f.argtypes = _a
+
+CL_MEM_READ_WRITE = 1 << 0
+
+
+class CLBuffer:
+    """OpenCL デバイス上のバッファ。"""
+    def __init__(self, comp, nbytes):
+        self.comp = comp; self.nbytes = max(int(nbytes), 1)
+        err = ctypes.c_int()
+        self.mem = _cl.clCreateBuffer(comp.ctx, CL_MEM_READ_WRITE, self.nbytes,
+                                      None, ctypes.byref(err))
+
+    def write(self, data_bytes):
+        b = (ctypes.c_char*len(data_bytes)).from_buffer_copy(data_bytes)
+        _cl.clEnqueueWriteBuffer(self.comp.q, self.mem, 1, 0, len(data_bytes), b, 0, None, None)
+        return self
+
+    def read(self, nbytes=None):
+        nbytes = nbytes or self.nbytes
+        b = (ctypes.c_char*nbytes)()
+        _cl.clEnqueueReadBuffer(self.comp.q, self.mem, 1, 0, nbytes, b, 0, None, None)
+        return bytes(b)
+
+
+class CLKernel:
+    def __init__(self, comp, kern):
+        self.comp = comp; self.k = kern
+
+    def __call__(self, global_size, args):
+        for i, a in enumerate(args):
+            if isinstance(a, CLBuffer):
+                _cl.clSetKernelArg(self.k, i, ctypes.sizeof(P), ctypes.byref(P(a.mem)))
+            elif isinstance(a, float):
+                _cl.clSetKernelArg(self.k, i, 4, ctypes.byref(ctypes.c_float(a)))
+            else:
+                _cl.clSetKernelArg(self.k, i, 4, ctypes.byref(ctypes.c_int(int(a))))
+        g = (_SZ*1)(int(global_size))
+        _cl.clEnqueueNDRangeKernel(self.comp.q, self.k, 1, None, g, None, 0, None, None)
+        _cl.clFinish(self.comp.q)
+
+
+class CLCompute:
+    """1 つの OpenCL デバイス上で計算する(全ベンダ・iGPU 対応)。"""
+    def __init__(self, device_handle):
+        err = ctypes.c_int()
+        self.dev = P(device_handle)
+        self.ctx = _cl.clCreateContext(None, 1, ctypes.byref(self.dev), None, None, ctypes.byref(err))
+        self.q = _cl.clCreateCommandQueue(self.ctx, self.dev, 0, ctypes.byref(err))
+
+    def buffer(self, nbytes): return CLBuffer(self, nbytes)
+
+    def build(self, source):
+        if isinstance(source, str): source = source.encode()
+        err = ctypes.c_int()
+        src = ctypes.c_char_p(source); ln = _SZ(len(source))
+        prog = _cl.clCreateProgramWithSource(self.ctx, 1, ctypes.byref(src), ctypes.byref(ln), ctypes.byref(err))
+        if _cl.clBuildProgram(prog, 1, ctypes.byref(self.dev), None, None, None) != 0:
+            log = _sinfo(lambda h, pa, s, b, x: _cl.clGetProgramBuildInfo(h, self.dev, pa, s, b, x), prog, 0x1183)
+            raise RuntimeError("OpenCL build failed:\n"+log)
+        self._prog = prog; return prog
+
+    def kernel(self, name):
+        err = ctypes.c_int()
+        k = _cl.clCreateKernel(self._prog, name.encode(), ctypes.byref(err))
+        return CLKernel(self, k)

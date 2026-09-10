@@ -32,10 +32,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.1.0-py3-none-any.whl
+pip install gpudirect-0.2.0-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.1.0.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.2.0.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 
@@ -44,6 +44,33 @@ pip install numpy
 ```
 
 ---
+
+## 対応する GPU（v0.2.0〜）
+
+**NVIDIA だけでなく、AMD・Intel の GPU と内蔵GPU(iGPU)でも計算できます。**
+NVIDIA は CUDA(手書き PTX)、それ以外は OpenCL(手書き OpenCL C)で動きます。
+どちらも同じ書き方で扱えます。
+
+```python
+import gpudirect.easy as ge
+ge.devices()                       # 全ベンダの GPU/iGPU を一覧
+g = ge.GPU(0)                      # 既定 = NVIDIA(CUDA)
+g = ge.GPU(0, backend="opencl")    # AMD / Intel / iGPU(OpenCL)
+```
+
+## どのライブラリの配列とも噛み合う
+
+入力は numpy 配列・list・bytes・バッファ・`__array__` を持つ物(torch の CPU テンソル等)・
+`__dlpack__` を持つ物、なんでも受け取れます。出力(`GpuArray`/`CLArray`)は
+`np.asarray(x)` でそのまま numpy として取り出せる(array-protocol 対応)ので、
+他のライブラリとつなげられます。
+
+```python
+g = ge.GPU(0)
+x = g.to_gpu([1, 2, 3])            # list でも
+y = g.to_gpu(np_array)             # numpy でも
+import numpy as np; np.asarray(x)  # numpy として取り出す
+```
 
 ## 使い方は3段階
 
