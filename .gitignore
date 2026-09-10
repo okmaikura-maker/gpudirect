@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+build/
+*.egg-info/
+gpt_weights.npz
+chat_memory.txt

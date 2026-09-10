@@ -1,0 +1,51 @@
+//
+// 因果マスク付き行 softmax: scores S[T,T] の各行 i について、
+//   v_j = scale * S[i,j]  (j<=i のみ有効、j>i は 0 にマスク)
+//   S[i,j] = softmax_j(v)   (数値安定化に max 減算、exp は ex2 で近似)
+// 1 スレッド = 1 クエリ行 i。scale は 1/sqrt(head_dim) を渡す。sm_75。
+//
+.version 7.0
+.target sm_75
+.address_size 64
+.visible .entry softmax_causal(.param .u64 S, .param .u32 T, .param .f32 scale)
+{
+    .reg .pred %p,%pk; .reg .b32 %r<12>; .reg .f32 %f<10>; .reg .b64 %rd<10>;
+    ld.param.u64 %rd1,[S]; ld.param.u32 %r1,[T]; ld.param.f32 %f9,[scale];
+    mov.u32 %r2,%ctaid.x; mov.u32 %r3,%ntid.x; mov.u32 %r4,%tid.x;
+    mad.lo.s32 %r5,%r2,%r3,%r4;                  // row i
+    setp.ge.s32 %p,%r5,%r1; @%p bra DONE;
+    cvta.to.global.u64 %rd2,%rd1;
+    mul.lo.s32 %r6,%r5,%r1;                       // i*T
+    add.s32 %r7,%r5,1;                            // 有効数 = i+1
+    // --- max ---
+    mov.f32 %f1,0fFF800000; mov.u32 %r8,0;
+MX:
+    setp.ge.s32 %pk,%r8,%r7; @%pk bra MX_D;
+    add.s32 %r9,%r6,%r8; mul.wide.s32 %rd3,%r9,4; add.s64 %rd4,%rd2,%rd3; ld.global.f32 %f2,[%rd4];
+    mul.f32 %f2,%f2,%f9; max.f32 %f1,%f1,%f2; add.s32 %r8,%r8,1; bra MX;
+MX_D:
+    // --- exp & sum (結果を一旦その場に書く) ---
+    mov.f32 %f3,0f00000000; mov.u32 %r8,0;       // sum
+SM:
+    setp.ge.s32 %pk,%r8,%r7; @%pk bra SM_D;
+    add.s32 %r9,%r6,%r8; mul.wide.s32 %rd3,%r9,4; add.s64 %rd4,%rd2,%rd3; ld.global.f32 %f2,[%rd4];
+    mul.f32 %f2,%f2,%f9; sub.f32 %f4,%f2,%f1;
+    mul.f32 %f4,%f4,0f3FB8AA3B;                    // *log2(e)
+    ex2.approx.f32 %f5,%f4;                        // 2^x = exp
+    add.f32 %f3,%f3,%f5; st.global.f32 [%rd4],%f5; add.s32 %r8,%r8,1; bra SM;
+SM_D:
+    rcp.approx.f32 %f6,%f3;                        // 1/sum
+    // --- 正規化 (j<=i) と マスク (j>i) ---
+    mov.u32 %r8,0;
+WR:
+    setp.ge.s32 %pk,%r8,%r1; @%pk bra DONE;
+    add.s32 %r9,%r6,%r8; mul.wide.s32 %rd3,%r9,4; add.s64 %rd4,%rd2,%rd3;
+    setp.lt.s32 %p,%r8,%r7;                        // j < i+1 ?
+    @!%p bra ZERO;
+    ld.global.f32 %f5,[%rd4]; mul.f32 %f5,%f5,%f6; st.global.f32 [%rd4],%f5; bra NEXT;
+ZERO:
+    mov.f32 %f7,0f00000000; st.global.f32 [%rd4],%f7;
+NEXT:
+    add.s32 %r8,%r8,1; bra WR;
+DONE: ret;
+}

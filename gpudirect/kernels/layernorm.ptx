@@ -1,0 +1,51 @@
+//
+// 行ごとの LayerNorm: X[M,N] の各行について
+//   mean, var を取り  y = (x-mean)/sqrt(var+eps)*gamma[j] + beta[j]
+// 1 スレッド = 1 行 (N は数百程度)。eps=1e-5。sm_75。
+//
+.version 7.0
+.target sm_75
+.address_size 64
+.visible .entry layernorm(
+    .param .u64 X, .param .u64 gamma, .param .u64 beta,
+    .param .u32 M, .param .u32 N)
+{
+    .reg .pred %p,%pk; .reg .b32 %r<12>; .reg .f32 %f<12>; .reg .b64 %rd<14>;
+    ld.param.u64 %rd1,[X]; ld.param.u64 %rd2,[gamma]; ld.param.u64 %rd3,[beta];
+    ld.param.u32 %r1,[M]; ld.param.u32 %r2,[N];
+    mov.u32 %r3,%ctaid.x; mov.u32 %r4,%ntid.x; mov.u32 %r5,%tid.x;
+    mad.lo.s32 %r6,%r3,%r4,%r5;                  // row
+    setp.ge.s32 %p,%r6,%r1; @%p bra DONE;
+    cvta.to.global.u64 %rd4,%rd1; cvta.to.global.u64 %rd5,%rd2; cvta.to.global.u64 %rd6,%rd3;
+    mul.lo.s32 %r7,%r6,%r2;                       // row*N (行先頭要素)
+    cvt.rn.f32.s32 %f10,%r2;                      // (float)N
+    // --- mean ---
+    mov.f32 %f1,0f00000000; mov.u32 %r8,0;
+MEAN:
+    setp.ge.s32 %pk,%r8,%r2; @%pk bra MEAN_D;
+    add.s32 %r9,%r7,%r8; mul.wide.s32 %rd7,%r9,4; add.s64 %rd8,%rd4,%rd7; ld.global.f32 %f2,[%rd8];
+    add.f32 %f1,%f1,%f2; add.s32 %r8,%r8,1; bra MEAN;
+MEAN_D:
+    div.rn.f32 %f3,%f1,%f10;                      // mean
+    // --- var ---
+    mov.f32 %f4,0f00000000; mov.u32 %r8,0;
+VAR:
+    setp.ge.s32 %pk,%r8,%r2; @%pk bra VAR_D;
+    add.s32 %r9,%r7,%r8; mul.wide.s32 %rd7,%r9,4; add.s64 %rd8,%rd4,%rd7; ld.global.f32 %f2,[%rd8];
+    sub.f32 %f5,%f2,%f3; fma.rn.f32 %f4,%f5,%f5,%f4; add.s32 %r8,%r8,1; bra VAR;
+VAR_D:
+    div.rn.f32 %f6,%f4,%f10;                      // var
+    add.f32 %f6,%f6,0f3727C5AC;                   // +1e-5
+    rsqrt.approx.f32 %f7,%f6;                      // 1/sqrt(var+eps)
+    // --- normalize + affine ---
+    mov.u32 %r8,0;
+NORM:
+    setp.ge.s32 %pk,%r8,%r2; @%pk bra DONE;
+    add.s32 %r9,%r7,%r8; mul.wide.s32 %rd7,%r9,4; add.s64 %rd8,%rd4,%rd7; ld.global.f32 %f2,[%rd8];
+    sub.f32 %f8,%f2,%f3; mul.f32 %f8,%f8,%f7;
+    mul.wide.s32 %rd9,%r8,4; add.s64 %rd10,%rd5,%rd9; ld.global.f32 %f9,[%rd10]; // gamma[j]
+    add.s64 %rd11,%rd6,%rd9; ld.global.f32 %f11,[%rd11];                          // beta[j]
+    fma.rn.f32 %f8,%f8,%f9,%f11;
+    st.global.f32 [%rd8],%f8; add.s32 %r8,%r8,1; bra NORM;
+DONE: ret;
+}

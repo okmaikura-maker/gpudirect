@@ -1,0 +1,64 @@
+//
+// 全結合層の後処理: 各要素に列ごとのバイアスを足し、任意で ReLU をかける。
+//   X[M,N] は row-major。col = idx % N。
+//   X[idx] = X[idx] + bias[col];  if (do_relu) X[idx] = max(X[idx], 0)
+// do_relu != 0 で ReLU 有効、0 で線形(出力層用)。
+// sm_75 (GTX 1650)。1D grid でフラットに起動。
+//
+.version 7.0
+.target sm_75
+.address_size 64
+
+.visible .entry bias_relu(
+    .param .u64 X,
+    .param .u64 bias,
+    .param .u32 M,
+    .param .u32 N,
+    .param .u32 do_relu
+)
+{
+    .reg .pred  %p, %pr;
+    .reg .b32   %r<12>;
+    .reg .f32   %f<4>;
+    .reg .b64   %rd<10>;
+
+    ld.param.u64 %rd1, [X];
+    ld.param.u64 %rd2, [bias];
+    ld.param.u32 %r1,  [M];
+    ld.param.u32 %r2,  [N];
+    ld.param.u32 %r3,  [do_relu];
+
+    mov.u32      %r4, %ctaid.x;
+    mov.u32      %r5, %ntid.x;
+    mov.u32      %r6, %tid.x;
+    mad.lo.s32   %r7, %r4, %r5, %r6;      // idx
+
+    mul.lo.s32   %r8, %r1, %r2;           // total = M*N
+    setp.ge.s32  %p, %r7, %r8;
+    @%p bra      DONE;
+
+    rem.s32      %r9, %r7, %r2;           // col = idx % N
+
+    cvta.to.global.u64 %rd3, %rd1;
+    cvta.to.global.u64 %rd4, %rd2;
+
+    mul.wide.s32 %rd5, %r7, 4;
+    add.s64      %rd6, %rd3, %rd5;
+    ld.global.f32 %f1, [%rd6];            // X[idx]
+
+    mul.wide.s32 %rd7, %r9, 4;
+    add.s64      %rd8, %rd4, %rd7;
+    ld.global.f32 %f2, [%rd8];            // bias[col]
+
+    add.f32      %f1, %f1, %f2;           // + bias
+
+    setp.eq.s32  %pr, %r3, 0;             // do_relu == 0 ?
+    @%pr bra     STORE;
+    max.f32      %f1, %f1, 0f00000000;    // ReLU
+
+STORE:
+    st.global.f32 [%rd6], %f1;
+
+DONE:
+    ret;
+}

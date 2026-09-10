@@ -1,0 +1,29 @@
+//
+// C[I,J] = A^T @ B  where A is [R,I], B is [R,J]:  C[i,j]=sum_r A[r,i]*B[r,j].
+// Used for weight gradient dW[in,out] = X[N,in]^T @ dY[N,out]. 2D grid. sm_75.
+//
+.version 7.0
+.target sm_75
+.address_size 64
+.visible .entry matmul_tn(
+    .param .u64 A, .param .u64 B, .param .u64 C,
+    .param .u32 I, .param .u32 J, .param .u32 R)
+{
+    .reg .pred %p,%pk; .reg .b32 %r<20>; .reg .f32 %f<4>; .reg .b64 %rd<14>;
+    ld.param.u64 %rd1,[A]; ld.param.u64 %rd2,[B]; ld.param.u64 %rd3,[C];
+    ld.param.u32 %r1,[I]; ld.param.u32 %r2,[J]; ld.param.u32 %r3,[R];
+    mov.u32 %r4,%ctaid.x; mov.u32 %r5,%ntid.x; mov.u32 %r6,%tid.x; mad.lo.s32 %r7,%r4,%r5,%r6; // j
+    mov.u32 %r8,%ctaid.y; mov.u32 %r9,%ntid.y; mov.u32 %r10,%tid.y; mad.lo.s32 %r11,%r8,%r9,%r10; // i
+    setp.ge.s32 %p,%r11,%r1; @%p bra DONE;
+    setp.ge.s32 %p,%r7,%r2;  @%p bra DONE;
+    cvta.to.global.u64 %rd4,%rd1; cvta.to.global.u64 %rd5,%rd2; cvta.to.global.u64 %rd6,%rd3;
+    mov.f32 %f1,0f00000000; mov.u32 %r12,0;   // r
+LOOP:
+    setp.ge.s32 %pk,%r12,%r3; @%pk bra ENDL;
+    mul.lo.s32 %r13,%r12,%r1; add.s32 %r13,%r13,%r11; mul.wide.s32 %rd7,%r13,4; add.s64 %rd8,%rd4,%rd7; ld.global.f32 %f2,[%rd8]; // A[r,i]
+    mul.lo.s32 %r14,%r12,%r2; add.s32 %r14,%r14,%r7;  mul.wide.s32 %rd9,%r14,4; add.s64 %rd10,%rd5,%rd9; ld.global.f32 %f3,[%rd10]; // B[r,j]
+    fma.rn.f32 %f1,%f2,%f3,%f1; add.s32 %r12,%r12,1; bra LOOP;
+ENDL:
+    mul.lo.s32 %r15,%r11,%r2; add.s32 %r15,%r15,%r7; mul.wide.s32 %rd11,%r15,4; add.s64 %rd12,%rd6,%rd11; st.global.f32 [%rd12],%f1;
+DONE: ret;
+}

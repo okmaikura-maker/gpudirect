@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpudirect"
+version = "0.1.0"
+description = "Call the GPU (and iGPU) directly from Python via nvcuda.dll / OpenCL.dll — no CUDA Toolkit, no CuPy. Hand-written PTX kernels, one-line saturation."
+readme = "README_gpudirect.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "gpudirect"}]
+keywords = ["gpu", "cuda", "opencl", "ptx", "nvcuda", "igpu", "no-toolkit"]
+dependencies = []
+
+[project.optional-dependencies]
+numpy = ["numpy"]
+
+[project.scripts]
+gpudirect-turbo = "gpudirect.turbo:_main"
+
+[tool.setuptools]
+packages = ["gpudirect"]
+py-modules = ["fastnumpy"]
+
+[tool.setuptools.package-data]
+gpudirect = ["kernels/*.ptx"]

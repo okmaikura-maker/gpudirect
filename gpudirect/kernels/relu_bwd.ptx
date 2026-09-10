@@ -1,0 +1,20 @@
+//
+// dA[i] *= (act[i] > 0)  : ReLU の逆伝播 (act は順伝播の ReLU 出力)。1D. sm_75.
+//
+.version 7.0
+.target sm_75
+.address_size 64
+.visible .entry relu_bwd(.param .u64 dA, .param .u64 act, .param .u32 n)
+{
+    .reg .pred %p,%pg; .reg .b32 %r<8>; .reg .f32 %f<3>; .reg .b64 %rd<8>;
+    ld.param.u64 %rd1,[dA]; ld.param.u64 %rd2,[act]; ld.param.u32 %r1,[n];
+    mov.u32 %r2,%ctaid.x; mov.u32 %r3,%ntid.x; mov.u32 %r4,%tid.x; mad.lo.s32 %r5,%r2,%r3,%r4;
+    setp.ge.s32 %p,%r5,%r1; @%p bra DONE;
+    cvta.to.global.u64 %rd3,%rd1; cvta.to.global.u64 %rd4,%rd2;
+    mul.wide.s32 %rd5,%r5,4; add.s64 %rd6,%rd3,%rd5; add.s64 %rd7,%rd4,%rd5;
+    ld.global.f32 %f1,[%rd7]; setp.gt.f32 %pg,%f1,0f00000000;
+    @%pg bra DONE2;
+    mov.f32 %f2,0f00000000; st.global.f32 [%rd6],%f2;
+DONE2:
+DONE: ret;
+}

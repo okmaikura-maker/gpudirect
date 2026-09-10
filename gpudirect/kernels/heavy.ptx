@@ -1,0 +1,58 @@
+//
+// 計算律速カーネル: 各要素で x = 0.9*x + 0.1 を iters 回まわす (FMA ループ)。
+// 0<=x<1 なら 1.0 に収束し発散しないので、純粋に FLOP だけを積める。
+// sm_75 (GTX 1650) 向け。iters は実行時パラメータなので ptxas は消し込めない。
+//
+.version 7.0
+.target sm_75
+.address_size 64
+
+.visible .entry heavy(
+    .param .u64 inp,
+    .param .u64 outp,
+    .param .u32 n,
+    .param .u32 iters
+)
+{
+    .reg .pred  %p, %pc;
+    .reg .b32   %r<8>;
+    .reg .f32   %f<4>;
+    .reg .b64   %rd<8>;
+
+    ld.param.u64 %rd1, [inp];
+    ld.param.u64 %rd2, [outp];
+    ld.param.u32 %r2,  [n];
+    ld.param.u32 %r3,  [iters];
+
+    mov.u32      %r4, %ctaid.x;
+    mov.u32      %r5, %ntid.x;
+    mov.u32      %r6, %tid.x;
+    mad.lo.s32   %r1, %r4, %r5, %r6;      // idx
+
+    setp.ge.s32  %p, %r1, %r2;
+    @%p bra      DONE;
+
+    cvta.to.global.u64 %rd3, %rd1;
+    mul.wide.s32 %rd4, %r1, 4;
+    add.s64      %rd5, %rd3, %rd4;
+    ld.global.f32 %f1, [%rd5];           // x = in[idx]
+
+    mov.f32      %f2, 0f3F666666;         // 0.9
+    mov.f32      %f3, 0f3DCCCCCD;         // 0.1
+    mov.u32      %r7, 0;                  // k = 0
+
+LOOP:
+    setp.ge.u32  %pc, %r7, %r3;
+    @%pc bra     ENDLOOP;
+    fma.rn.f32   %f1, %f1, %f2, %f3;      // x = x*0.9 + 0.1
+    add.u32      %r7, %r7, 1;
+    bra          LOOP;
+
+ENDLOOP:
+    cvta.to.global.u64 %rd6, %rd2;
+    add.s64      %rd7, %rd6, %rd4;
+    st.global.f32 [%rd7], %f1;            // out[idx] = x
+
+DONE:
+    ret;
+}

@@ -1,0 +1,87 @@
+//
+// 限界突破版: 各スレッドで 8 本の独立した FMA 列を同時に回す。
+// heavy.ptx は一本鎖 (各 FMA が直前に依存) でパイプラインが埋まらず
+// ピークの ~55% 止まりだった。独立列を 8 本にすると命令レベル並列性(ILP)で
+// FMA パイプラインが埋まり、実効 FLOP/s がピークに近づく。
+// 総 FLOP = N * iters * 8 列 * 2(FMA)。 sm_75 (GTX 1650)。
+//
+.version 7.0
+.target sm_75
+.address_size 64
+
+.visible .entry heavy8(
+    .param .u64 inp,
+    .param .u64 outp,
+    .param .u32 n,
+    .param .u32 iters
+)
+{
+    .reg .pred  %p, %pc;
+    .reg .b32   %r<8>;
+    .reg .f32   %f<20>;
+    .reg .b64   %rd<8>;
+
+    ld.param.u64 %rd1, [inp];
+    ld.param.u64 %rd2, [outp];
+    ld.param.u32 %r2,  [n];
+    ld.param.u32 %r3,  [iters];
+
+    mov.u32      %r4, %ctaid.x;
+    mov.u32      %r5, %ntid.x;
+    mov.u32      %r6, %tid.x;
+    mad.lo.s32   %r1, %r4, %r5, %r6;
+    setp.ge.s32  %p, %r1, %r2;
+    @%p bra      DONE;
+
+    cvta.to.global.u64 %rd3, %rd1;
+    mul.wide.s32 %rd4, %r1, 4;
+    add.s64      %rd5, %rd3, %rd4;
+    ld.global.f32 %f1, [%rd5];            // x
+
+    mov.f32      %f18, 0f3F666666;         // 0.9
+    mov.f32      %f19, 0f3DCCCCCD;         // 0.1
+
+    // 8 本の独立アキュムレータを別々の初期値で種付け (互いに独立にする)
+    add.f32      %f2,  %f1, 0f00000000;    // +0.0
+    add.f32      %f3,  %f1, 0f3DCCCCCD;    // +0.1
+    add.f32      %f4,  %f1, 0f3E4CCCCD;    // +0.2
+    add.f32      %f5,  %f1, 0f3E99999A;    // +0.3
+    add.f32      %f6,  %f1, 0f3ECCCCCD;    // +0.4
+    add.f32      %f7,  %f1, 0f3F000000;    // +0.5
+    add.f32      %f8,  %f1, 0f3F19999A;    // +0.6
+    add.f32      %f9,  %f1, 0f3F333333;    // +0.7
+
+    mov.u32      %r7, 0;
+
+LOOP:
+    setp.ge.u32  %pc, %r7, %r3;
+    @%pc bra     ENDLOOP;
+    // 8 本を同一ループ内で更新 -> 互いに独立なので並列に発行できる
+    fma.rn.f32   %f2, %f2, %f18, %f19;
+    fma.rn.f32   %f3, %f3, %f18, %f19;
+    fma.rn.f32   %f4, %f4, %f18, %f19;
+    fma.rn.f32   %f5, %f5, %f18, %f19;
+    fma.rn.f32   %f6, %f6, %f18, %f19;
+    fma.rn.f32   %f7, %f7, %f18, %f19;
+    fma.rn.f32   %f8, %f8, %f18, %f19;
+    fma.rn.f32   %f9, %f9, %f18, %f19;
+    add.u32      %r7, %r7, 1;
+    bra          LOOP;
+
+ENDLOOP:
+    // 8 本を合算して書き出す (結果を捨てないことで最適化消去を防ぐ)
+    add.f32      %f10, %f2, %f3;
+    add.f32      %f11, %f4, %f5;
+    add.f32      %f12, %f6, %f7;
+    add.f32      %f13, %f8, %f9;
+    add.f32      %f14, %f10, %f11;
+    add.f32      %f15, %f12, %f13;
+    add.f32      %f16, %f14, %f15;
+
+    cvta.to.global.u64 %rd6, %rd2;
+    add.s64      %rd7, %rd6, %rd4;
+    st.global.f32 [%rd7], %f16;
+
+DONE:
+    ret;
+}

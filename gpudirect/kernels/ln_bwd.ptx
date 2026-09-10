@@ -1,0 +1,61 @@
+//
+// LayerNorm backward. Given dY[M,N], X[M,N], gamma[N], mean[M], istd[M]:
+//   xn=(x-mean)*istd ; dxn=dY*gamma
+//   dX = istd/N*(N*dxn - sum(dxn) - xn*sum(dxn*xn))
+//   dgamma[j] += sum_rows dY*xn ; dbeta[j] += sum_rows dY   (atomic)
+// 1 thread/row. dgamma/dbeta must be zeroed first. sm_75.
+//
+.version 7.0
+.target sm_75
+.address_size 64
+.visible .entry ln_bwd(
+    .param .u64 dY, .param .u64 X, .param .u64 g, .param .u64 mean, .param .u64 istd,
+    .param .u64 dX, .param .u64 dg, .param .u64 db, .param .u32 M, .param .u32 N)
+{
+    .reg .pred %p,%pk; .reg .b32 %r<12>; .reg .f32 %f<16>; .reg .b64 %rd<24>;
+    ld.param.u64 %rd1,[dY]; ld.param.u64 %rd2,[X]; ld.param.u64 %rd3,[g];
+    ld.param.u64 %rd4,[mean]; ld.param.u64 %rd5,[istd];
+    ld.param.u64 %rd6,[dX]; ld.param.u64 %rd7,[dg]; ld.param.u64 %rd8,[db];
+    ld.param.u32 %r1,[M]; ld.param.u32 %r2,[N];
+    mov.u32 %r3,%ctaid.x; mov.u32 %r4,%ntid.x; mov.u32 %r5,%tid.x; mad.lo.s32 %r6,%r3,%r4,%r5;
+    setp.ge.s32 %p,%r6,%r1; @%p bra DONE;
+    cvta.to.global.u64 %rd1,%rd1; cvta.to.global.u64 %rd2,%rd2; cvta.to.global.u64 %rd3,%rd3;
+    cvta.to.global.u64 %rd4,%rd4; cvta.to.global.u64 %rd5,%rd5; cvta.to.global.u64 %rd6,%rd6;
+    cvta.to.global.u64 %rd7,%rd7; cvta.to.global.u64 %rd8,%rd8;
+    mul.lo.s32 %r7,%r6,%r2; cvt.rn.f32.s32 %f10,%r2;
+    mul.wide.s32 %rd9,%r6,4; add.s64 %rd10,%rd4,%rd9; ld.global.f32 %f11,[%rd10];  // mean
+    add.s64 %rd11,%rd5,%rd9; ld.global.f32 %f12,[%rd11];                           // istd
+    // pass1: s1=sum(dxn), s2=sum(dxn*xn)
+    mov.f32 %f1,0f00000000; mov.f32 %f2,0f00000000; mov.u32 %r8,0;
+P1:
+    setp.ge.s32 %pk,%r8,%r2; @%pk bra P1_D;
+    add.s32 %r9,%r7,%r8; mul.wide.s32 %rd12,%r9,4;
+    add.s64 %rd13,%rd1,%rd12; ld.global.f32 %f3,[%rd13];         // dY
+    add.s64 %rd14,%rd2,%rd12; ld.global.f32 %f4,[%rd14];         // x
+    mul.wide.s32 %rd15,%r8,4; add.s64 %rd16,%rd3,%rd15; ld.global.f32 %f5,[%rd16]; // g
+    mul.f32 %f6,%f3,%f5;                                          // dxn=dY*g
+    sub.f32 %f7,%f4,%f11; mul.f32 %f7,%f7,%f12;                   // xn
+    add.f32 %f1,%f1,%f6; fma.rn.f32 %f2,%f6,%f7,%f2;
+    add.s32 %r8,%r8,1; bra P1;
+P1_D:
+    // pass2: dX and atomics
+    div.rn.f32 %f13,%f12,%f10;                                    // istd/N
+    mov.u32 %r8,0;
+P2:
+    setp.ge.s32 %pk,%r8,%r2; @%pk bra DONE;
+    add.s32 %r9,%r7,%r8; mul.wide.s32 %rd12,%r9,4;
+    add.s64 %rd13,%rd1,%rd12; ld.global.f32 %f3,[%rd13];
+    add.s64 %rd14,%rd2,%rd12; ld.global.f32 %f4,[%rd14];
+    mul.wide.s32 %rd15,%r8,4; add.s64 %rd16,%rd3,%rd15; ld.global.f32 %f5,[%rd16];
+    mul.f32 %f6,%f3,%f5;                                          // dxn
+    sub.f32 %f7,%f4,%f11; mul.f32 %f7,%f7,%f12;                   // xn
+    // dX = istd/N*(N*dxn - s1 - xn*s2)
+    mul.f32 %f9,%f7,%f2;                          // xn*s2
+    mul.f32 %f8,%f6,%f10; sub.f32 %f8,%f8,%f1; sub.f32 %f8,%f8,%f9; mul.f32 %f8,%f8,%f13;
+    add.s64 %rd17,%rd6,%rd12; st.global.f32 [%rd17],%f8;
+    // dgamma[j]+=dY*xn ; dbeta[j]+=dY
+    mul.f32 %f15,%f3,%f7; add.s64 %rd18,%rd7,%rd15; red.global.add.f32 [%rd18],%f15;
+    add.s64 %rd19,%rd8,%rd15; red.global.add.f32 [%rd19],%f3;
+    add.s32 %r8,%r8,1; bra P2;
+DONE: ret;
+}
