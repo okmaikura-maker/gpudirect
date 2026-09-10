@@ -18,7 +18,6 @@ g = gd.GPU(0)                      # 汎用API(easy)
 g = gd.GPU(0, backend="opencl")   # AMD/Intel/iGPU
 gd.saturate()                      # 一行で全GPU飽和(turbo)
 c = gd.array(A) @ gd.array(B)      # numpy風(fastnumpy)
-gd.GpuGPTTrainer(...)              # GPUで学習
 ```
 
 `easy` / `turbo` / `fastnumpy` / `transformer` / `train_gpt` などは
@@ -48,10 +47,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.2.2-py3-none-any.whl
+pip install gpudirect-0.3.0-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.2.2.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.3.0.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 
@@ -149,10 +148,8 @@ print(out.get())                            # GPU → numpy
 | `gpudirect.turbo` | 全 GPU/iGPU を一行で最大飽和(段階1) |
 | `gpudirect.opencl` | `OpenCL.dll` を直叩き。内蔵GPU含む全ベンダを列挙・稼働 |
 | `fastnumpy` | numpy 風に GPU で計算(段階2) |
-| `gpudirect.transformer` / `train_gpt` | 小さな GPT を GPU で「推論」＆「学習」。全部手書き PTX |
 
-デモ: `gpu_general_demo.py`(汎用API)、`ai_demo.py`(ニューラルネット)、
-`gpu_baby.py`(GPT を GPU で学習)など。
+デモ: `gpu_general_demo.py`(汎用API / 自作カーネル)。
 
 ---
 
