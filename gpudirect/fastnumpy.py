@@ -115,8 +115,12 @@ def _pad2d(shape):
 
 
 def _run1d(kern, n, args):
+    # sync=False: このカーネルの完了を待たず、次の演算を GPU の命令キューに
+    # 積み続ける。「計算が終わった瞬間に次へ同化する」を実現する核心部分。
+    # 依存関係(前段の出力を次段が読む)は CUDA の単一ストリーム上で自動的に
+    # 順序が保たれるため、host が割り込んで待つ理由が無い。
     t = 256
-    kern(grid=((n+t-1)//t, 1, 1), block=(t, 1, 1), args=args)
+    kern(grid=((n+t-1)//t, 1, 1), block=(t, 1, 1), args=args, sync=False)
 
 
 class farray:
@@ -145,6 +149,9 @@ class farray:
 
     # ---- 変換 ----
     def numpy(self):
+        # ここで初めて GPU の完了を待つ(このオペランドが実際に必要になった瞬間)。
+        # それまでの演算連鎖はすべて sync=False で積まれたまま流れていた。
+        _gpu().synchronize()
         a = self.ga.get().reshape(self.pshape)
         if self.pshape != self.shape:
             if len(self.shape) == 2:
@@ -188,8 +195,10 @@ class farray:
         Mp, Kp = self.pshape; Kp2, Np = other.pshape
         assert Kp == Kp2, "K方向のパディングが揃っていません(内部不整合)"
         out = farray._wrap_like((M, N), (Mp, Np))
+        # sync=False: 結果は即座に次の演算(あるいは最終読み出し)に流れ込む。
+        # ここで待つと、連鎖する演算のたびに GPU が手を止めることになる。
         _mm(grid=(Np//64, Mp//64, 1), block=(16, 16, 1),
-            args=[self.ga, other.ga, out.ga, Mp, Np, Kp])
+            args=[self.ga, other.ga, out.ga, Mp, Np, Kp], sync=False)
         return out
 
     def relu(self):

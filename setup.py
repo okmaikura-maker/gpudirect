@@ -2,7 +2,7 @@
 from setuptools import setup
 setup(
     name="gpudirect",
-    version="0.5.0",
+    version="0.6.0",
     description="Direct GPU/iGPU from Python via nvcuda.dll / OpenCL.dll (no CUDA Toolkit).",
     packages=["gpudirect"],
     package_data={"gpudirect": ["kernels/*.ptx"]},
