@@ -9,7 +9,7 @@ gpudirect.pack — データを渡された瞬間に、GPU が読みやすい形
   3. 自動で切り戻す: 計算後はパディング分を取り除いて元の形状で返す
 
 使い方(自動・意識不要):
-    import gpudirect.fastnumpy as fnp
+    from gpudirect import pack
     c = fnp.array(A) @ fnp.array(B)   # 内部で自動的にパディング+ひとまとめ転送される
 
 明示的に使う場合:
