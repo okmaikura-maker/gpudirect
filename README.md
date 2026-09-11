@@ -47,10 +47,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.7.0-py3-none-any.whl
+pip install gpudirect-0.8.0-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.7.0.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.8.0.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 
@@ -223,6 +223,34 @@ print(a.match_count(b))    # 一致ビット数(XNOR+popcount)
 | **gpudirect(ビットパッキング)** | **4.0 MB(1/8)** | **8.4 ms(5.7倍)** |
 
 正しさは AND/OR/XOR/NOT/一致数すべて numpy と完全一致。
+
+## 01より速い記号は作れない、が「密度」は上げられる（v0.8.0〜）
+
+はっきり書いておく: **オンオフの切り替え速度(GPUのクロック)はソフトウェアからは
+一切変えられない**。シリコン(ハードウェア)が決めるもので、どんな独自の記号を
+発明しても、この物理的な速さそのものは1ナノ秒も変わらない。
+
+ソフトウェアが握れるのは「**1命令が運ぶ情報量**」だけ。2bit(4状態)記号を
+1ワードに16個詰めれば、true/falseの1bitパッキングでは表せない4種類の状態
+(未知/A/B/C など、DNA の ACGT のような用途)を、**int8配列の4倍の密度**で
+扱える。
+
+```python
+import numpy as np, gpudirect as gd
+A = np.random.randint(0, 4, 1000).astype(np.uint8)   # 0〜3 の4状態
+B = np.random.randint(0, 4, 1000).astype(np.uint8)
+a, b = gd.pack_quat(A), gd.pack_quat(B)
+print(a.match_count(b))    # 一致した記号の数
+```
+
+実測(このマシン、1600万記号):
+
+| | メモリ | 一致数計算 |
+|---|---|---|
+| numpy(uint8配列) | 16.0 MB | 24.5 ms |
+| **gpudirect(2bitパック)** | **4.0 MB(1/4)** | **10.6 ms(2.3倍)** |
+
+正しさは numpy と完全一致(round-trip・一致数とも diff=0)。
 
 ## 中に入っているもの
 

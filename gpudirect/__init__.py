@@ -447,6 +447,7 @@ _LAZY = {
     "to_library": ("interop", "to_library"),
     # ビットパッキング(0/1をGPUが最も得意な形で扱う)
     "pack_bits": ("bits", "pack"),
+    "pack_quat": ("bits", "pack_quat"),
 }
 __all__ = list(__all__) + list(_SUBMODULES) + list(_LAZY.keys())
 

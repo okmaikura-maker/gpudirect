@@ -1,0 +1,32 @@
+//
+// 2-bit (4-state) packed symbol array: 16 symbols per u32 word.
+// This is the honest ceiling of "packing more into one clock's worth of
+// work": more states per instruction than 1-bit packing, denser than an
+// int8-per-symbol array. It does NOT change clock speed (impossible in
+// software) -- it changes how much information one instruction carries.
+// sm_75.
+//
+.version 7.0
+.target sm_75
+.address_size 64
+
+// out[i] = (count of matching 2-bit symbols between a[i] and b[i], per word,
+//           computed via XOR + pairwise-OR-reduce + popcount trick)
+// For each of 16 symbol slots (2 bits each): slot matches iff its XOR is 00.
+// We compute m = ~( (x | (x>>1)) & 0x55555555 ) where x = a^b, then popcount(m).
+.visible .entry quat_match_count(.param .u64 a,.param .u64 b,.param .u64 out,.param .u32 n){
+ .reg .pred %p;.reg .b32 %r<12>;.reg .b64 %rd<9>;
+ ld.param.u64 %rd1,[a];ld.param.u64 %rd2,[b];ld.param.u64 %rd3,[out];ld.param.u32 %r2,[n];
+ mov.u32 %r3,%ctaid.x;mov.u32 %r4,%ntid.x;mov.u32 %r5,%tid.x;mad.lo.s32 %r1,%r3,%r4,%r5;
+ setp.ge.s32 %p,%r1,%r2;@%p bra E;
+ cvta.to.global.u64 %rd4,%rd1;cvta.to.global.u64 %rd5,%rd2;cvta.to.global.u64 %rd6,%rd3;
+ mul.wide.s32 %rd7,%r1,4;add.s64 %rd8,%rd4,%rd7;ld.global.u32 %r6,[%rd8];
+ add.s64 %rd8,%rd5,%rd7;ld.global.u32 %r7,[%rd8];
+ xor.b32 %r6,%r6,%r7;                 // x = a^b  (00 の2bitペアだけが不一致無し)
+ shr.u32 %r8,%r6,1;                   // x>>1
+ or.b32  %r9,%r6,%r8;                 // (x|(x>>1)) : 下位ビットに不一致が伝播
+ mov.u32 %r10,0x55555555;
+ and.b32 %r9,%r9,%r10;                // 各ペアの下位ビットだけ残す(1=不一致)
+ not.b32 %r9,%r9; and.b32 %r9,%r9,%r10; // 反転して「一致した2bitペア」だけ1に
+ popc.b32 %r11,%r9;                   // 一致したペア(=記号)の個数
+ add.s64 %rd8,%rd6,%rd7;st.global.u32 [%rd8],%r11;E:ret;}

@@ -92,3 +92,60 @@ class BitArray:
         u32 = np.array(self.mem.copy_to_host("u4", self.n_words))
         bits = np.unpackbits(u32.view(np.uint8), bitorder="little")
         return bits[:self.n_bits].reshape(self.shape).astype(bool)
+
+
+# ============================================================================
+# 2-bit (4状態) 記号配列: 1ワードに16記号。true/false だけでは足りない、
+# 4種類の状態(例: 未知/A/B/C, DNA の ACGT 等)を int8 の 4倍密に詰める。
+# 正直な注記: これは「速さ」ではなく「密度」の技術。GPU のクロック速度
+# (オンオフの物理的な速さ)はソフトウェアからは一切変えられない。
+# ============================================================================
+def pack_quat(symbols):
+    """0〜3 の整数配列を 2bit/記号、16記号/word に詰めて GPU へ送る。"""
+    a = np.ascontiguousarray(symbols, dtype=np.uint8)
+    if a.max(initial=0) > 3:
+        raise ValueError("記号は 0〜3 の範囲にしてください(2bit = 4状態)")
+    n_sym = a.size
+    flat = a.reshape(-1)
+    pad = (-len(flat)) % 16
+    if pad:
+        flat = np.concatenate([flat, np.zeros(pad, np.uint8)])
+    words = np.zeros(len(flat)//16, np.uint32)
+    for i in range(16):
+        words |= flat[i::16].astype(np.uint32) << (i*2)
+    ctx = _ctx()
+    mem = ctx.to_device(words.tolist(), "u4")
+    return QuatArray(ctx, mem, n_sym, a.shape)
+
+
+class QuatArray:
+    """2bit(4状態)記号を 16個/word に詰めた配列(GPU上)。"""
+
+    def __init__(self, ctx, mem, n_sym, shape):
+        self.ctx = ctx; self.mem = mem
+        self.n_sym = n_sym; self.shape = shape
+        self.n_words = (n_sym + 15) // 16
+
+    def _kernel(self):
+        if not hasattr(self.ctx, "_quatops"):
+            m = self.ctx.load_ptx(open(os.path.join(_KDIR, "quatops.ptx"), "rb").read())
+            self.ctx._quatops = m.function("quat_match_count")
+        return self.ctx._quatops
+
+    def match_count(self, other):
+        """自分と other で、値が一致する記号(2bitペア)の総数。"""
+        k = self._kernel()
+        out = self.ctx.malloc(self.n_words * 4)
+        t = 256
+        k.launch(grid=((self.n_words+t-1)//t, 1, 1), block=(t, 1, 1),
+                args=[self.mem, other.mem, out, self.n_words])
+        counts = np.array(out.copy_to_host("u4", self.n_words))
+        pad_sym = self.n_words*16 - self.n_sym
+        return int(counts.sum()) - pad_sym  # 末尾パディング(両側00)の水増し分を補正
+
+    def numpy(self):
+        words = np.array(self.mem.copy_to_host("u4", self.n_words))
+        out = np.zeros(self.n_words*16, np.uint8)
+        for i in range(16):
+            out[i::16] = (words >> (i*2)) & 0b11
+        return out[:self.n_sym].reshape(self.shape)
