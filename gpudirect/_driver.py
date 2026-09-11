@@ -141,6 +141,10 @@ cuCtxSetCurrent = _resolve("cuCtxSetCurrent", CUresult, [CUcontext])
 
 cuMemAlloc = _resolve("cuMemAlloc_v2", CUresult, [P, ctypes.c_size_t])
 cuMemFree = _resolve("cuMemFree_v2", CUresult, [CUdeviceptr])
+# Unified Memory: CPU/GPU が同じアドレスを共有する(ゼロコピー)確保
+CU_MEM_ATTACH_GLOBAL = 1
+cuMemAllocManaged = _resolve("cuMemAllocManaged", CUresult,
+                             [P, ctypes.c_size_t, ctypes.c_uint])
 cuMemcpyHtoD = _resolve("cuMemcpyHtoD_v2", CUresult,
                         [CUdeviceptr, P, ctypes.c_size_t])
 cuMemcpyDtoH = _resolve("cuMemcpyDtoH_v2", CUresult,

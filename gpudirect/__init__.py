@@ -25,7 +25,7 @@ from . import _driver as _d
 from ._driver import CudaError
 
 __all__ = ["init", "device_count", "driver_version",
-           "Device", "Context", "Module", "Function", "DeviceMemory",
+           "Device", "Context", "Module", "Function", "DeviceMemory", "ManagedArray",
            "CudaError"]
 
 _initialized = False
@@ -134,6 +134,15 @@ class Context:
     def malloc(self, nbytes):
         return DeviceMemory(self, nbytes)
 
+    def zeros_shared(self, shape, dtype="f4"):
+        """
+        ゼロコピー配列(Unified Memory)を確保して返す。
+        CPU と GPU が同じ物理アドレスを共有するので、H2D/D2H の転送が要らない。
+        呼び出し側は .np で numpy 配列として直接読み書きでき、その変更は
+        コピーなしでそのまま GPU カーネルから見える(逆も同様)。
+        """
+        return ManagedArray(self, shape, dtype)
+
     def to_device(self, data, dtype="f4"):
         """
         Python の list / array / bytes を GPU に転送し DeviceMemory を返す。
@@ -240,6 +249,60 @@ class DeviceMemory:
             self.free()
         except Exception:
             pass
+
+
+class ManagedArray:
+    """
+    ゼロコピー配列(CUDA Unified Memory)。
+
+    普通の DeviceMemory は「CPU側バッファ → cuMemcpyHtoD → GPU側バッファ」
+    「GPU側バッファ → cuMemcpyDtoH → CPU側バッファ」と、都度コピーが発生する。
+    ManagedArray は cuMemAllocManaged で確保した 1 本のメモリを CPU/GPU 両方が
+    直接読み書きする。だからコピーが要らない(ゼロコピー) —— .np で得られる
+    numpy 配列への書き込みは、そのままカーネル起動時に GPU から見える。
+
+    制約: cuCtxSynchronize() を挟まずに CPU と GPU が同時アクセスすると
+    未定義動作になるため、GPU 側の処理後は必ず ctx.synchronize 相当を呼ぶこと
+    (Function.launch の既定 sync=True がこれを行う)。
+    """
+
+    def __init__(self, ctx, shape, dtype="f4"):
+        self.ctx = ctx
+        self.shape = tuple(shape) if hasattr(shape, "__iter__") else (int(shape),)
+        tc = _norm_dtype(dtype)
+        self._typecode = tc
+        itemsize = _TYPECODE_SIZE[tc]
+        self.size = 1
+        for s in self.shape:
+            self.size *= s
+        self.nbytes = self.size * itemsize
+        self.ptr = ctypes.c_uint64()
+        _d.check(_d.cuMemAllocManaged(ctypes.byref(self.ptr), max(self.nbytes, 1),
+                                      _d.CU_MEM_ATTACH_GLOBAL), "cuMemAllocManaged")
+        # ctypes 経由でこのアドレスに直接かぶさる numpy 配列を作る(コピー無し)
+        import numpy as _np
+        _np_dtype = {"f": _np.float32, "d": _np.float64, "i": _np.int32,
+                    "q": _np.int64, "I": _np.uint32, "B": _np.uint8,
+                    "b": _np.int8}[tc]
+        ctype = {"f": ctypes.c_float, "d": ctypes.c_double, "i": ctypes.c_int32,
+                "q": ctypes.c_int64, "I": ctypes.c_uint32, "B": ctypes.c_uint8,
+                "b": ctypes.c_int8}[tc]
+        buf = (ctype * self.size).from_address(self.ptr.value)
+        self.np = _np.ctypeslib.as_array(buf).reshape(self.shape)
+
+    def free(self):
+        if self.ptr and self.ptr.value:
+            _d.cuMemFree(_d.CUdeviceptr(self.ptr.value))
+            self.ptr = ctypes.c_uint64()
+
+    def __del__(self):
+        try:
+            self.free()
+        except Exception:
+            pass
+
+    def __repr__(self):
+        return f"ManagedArray(shape={self.shape}, dtype={self._typecode}, zero-copy)"
 
 
 class Module:

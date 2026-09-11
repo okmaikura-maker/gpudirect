@@ -47,10 +47,10 @@ GPU への命令(PTX という GPU 用アセンブリ)を **自分で書いて�
 ## インストール
 
 ```
-pip install gpudirect-0.4.0-py3-none-any.whl
+pip install gpudirect-0.5.0-py3-none-any.whl
 ```
 
-または同梱の MSI(`gpudirect-0.4.0.msi`)を実行するとローカルの Python に入ります。
+または同梱の MSI(`gpudirect-0.5.0.msi`)を実行するとローカルの Python に入ります。
 
 一部の機能(下記 fastnumpy と AI デモ)だけ `numpy` が必要です:
 
@@ -59,6 +59,36 @@ pip install numpy
 ```
 
 ---
+
+## ゼロコピー配列（v0.5.0〜）
+
+**CPU と GPU が同じメモリを直接共有する**配列です(CUDA Unified Memory)。
+普通は「CPU→GPU」「GPU→CPU」の転送(`cuMemcpyHtoD`/`DtoH`)が都度発生しますが、
+ゼロコピー配列は 1 回確保すれば、あとは numpy のように直接読み書きするだけで
+GPU 側からもそのまま見えます。転送コマンドを挟まない分、**繰り返し使うと実測で
+2〜4倍速い**(このマシンでの計測、下記参照)。
+
+```python
+import numpy as np, gpudirect as gd
+ctx = gd.Device(0).create_context()
+
+z = ctx.zeros_shared(1_000_000, "f4")   # 1回確保、CPU/GPU で共有
+z.np[:] = np.random.randn(1_000_000)    # numpy として直接書き込み(転送コマンド無し)
+fn.launch(grid=..., block=..., args=[z.ptr, 1_000_000])  # GPU が直接読み書き
+print(z.np[:5])                          # そのまま読める(転送コマンド無し)
+```
+
+実測(このマシン、400万要素、確保は1回のみ・使い回し):
+
+| 方式 | 時間/回 |
+|---|---|
+| 通常(`cuMemcpyHtoD`＋`cuMemcpyDtoH`を毎回) | 28.7 ms |
+| **ゼロコピー(直接読み書き)** | **7.1 ms(4.05倍)** |
+
+カーネル実行を挟む実運用パターン(200万要素、書く→GPU計算→読む)でも **2.15倍**。
+
+> 注意: GPU 側の処理が終わる前に CPU から読み書きすると競合するため、
+> カーネル起動後は同期(既定の `sync=True`)を挟むこと。
 
 ## 主要ライブラリと連携（v0.4.0〜）
 
